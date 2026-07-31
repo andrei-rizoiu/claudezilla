@@ -1300,8 +1300,11 @@ for (const tool of TOOLS) {
 }
 
 // Lazy loading activation state
-let activatedCategories = new Set();
-let isActivated = false;
+// Pre-activate all categories so tools are visible at session start
+// (Claude Code VSCode extension does not support mid-session tools/list_changed)
+const ALL_CATS = ['core', 'inspection', 'devtools', 'multiagent', 'loop', 'config', 'diagnose'];
+let activatedCategories = new Set(ALL_CATS);
+let isActivated = true;
 
 // Category groups — 'all' expands to every category
 const CATEGORY_GROUPS = {
