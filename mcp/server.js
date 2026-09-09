@@ -566,6 +566,84 @@ async function sendCommand(command, params = {}) {
 }
 
 /**
+ * Synthetic pointer sequence, dispatched in the page instead of asking the
+ * extension for a trusted click. Arrow functions only — the extension's
+ * expression validator rejects the `function` keyword.
+ */
+function syntheticClickExpression(selector) {
+  return `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)});
+  if (!el) return { clicked: false, error: 'NOT_FOUND', selector: ${JSON.stringify(selector)} };
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  const r = el.getBoundingClientRect();
+  const o = { bubbles: true, cancelable: true, composed: true, button: 0,
+              clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  el.dispatchEvent(new PointerEvent('pointerover', o));
+  el.dispatchEvent(new PointerEvent('pointerdown', o));
+  el.dispatchEvent(new MouseEvent('mousedown', o));
+  el.dispatchEvent(new PointerEvent('pointerup', o));
+  el.dispatchEvent(new MouseEvent('mouseup', o));
+  el.dispatchEvent(new MouseEvent('click', o));
+  return { clicked: true, tag: el.tagName, disabled: !!el.disabled,
+           rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+           text: (el.innerText || el.value || '').slice(0, 80) };
+})()`;
+}
+
+/**
+ * firefox_click asks the extension for a REAL mouse click, and a real click
+ * cannot be delivered to a window that lacks OS focus — the extension never
+ * answers and the caller waits out its whole timeout on an action that may
+ * already have committed server-side. Instruction alone ("use evaluate
+ * instead") is not a control: agents forget mid-task. So enforce it here.
+ *
+ * Returns an MCP result when it handled the click synthetically, or null to let
+ * the caller send the real click (window focused — a trusted gesture is the
+ * only way to open native OS dialogs, so keep it when it can actually work).
+ */
+async function clickWithoutFocus(params) {
+  let focused = null;
+  try {
+    const windows = await sendCommand('getWindows', {});
+    if (windows?.success && Array.isArray(windows.result)) {
+      focused = windows.result.some(w => w.focused);
+    }
+  } catch (e) {
+    focused = null; // Unknown — prefer the path that cannot hang.
+  }
+  if (focused === true) return null;
+
+  const evalParams = { expression: syntheticClickExpression(params.selector) };
+  if (params.tabId !== undefined) evalParams.tabId = params.tabId;
+  if (params._timeout !== undefined) evalParams._timeout = params._timeout;
+  if (params.agentId !== undefined) evalParams.agentId = params.agentId;
+
+  const why = focused === false
+    ? 'no Firefox window has OS focus'
+    : 'window focus could not be determined';
+  const note = `[claudezilla] firefox_click was routed through a synthetic pointer ` +
+    `sequence because ${why}; a trusted click would not have been answered. ` +
+    `Native OS dialogs (file pickers, downloads) cannot be triggered this way.`;
+
+  let response;
+  try {
+    response = await sendCommand('evaluate', evalParams);
+  } catch (err) {
+    return { content: [{ type: 'text', text: `${note}\nThat fallback failed: ${err.message}` }], isError: true };
+  }
+
+  if (!response?.success) {
+    return {
+      content: [{ type: 'text', text: `${note}\nThat fallback failed: ${response?.error || 'unknown error'}` }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: 'text', text: `${note}\n${JSON.stringify(response.result, null, 2)}` }],
+  };
+}
+
+/**
  * Check if navigate command is available
  * Returns false if extension is in Private Windows mode
  */
@@ -660,7 +738,7 @@ const TOOLS = [
   },
   {
     name: 'firefox_click',
-    description: 'Click an element by CSS selector. Works on background tabs.',
+    description: 'Click an element by CSS selector. Works on background tabs. When no Firefox window has OS focus this is automatically served by a synthetic pointer sequence (the trusted click would never be answered) — the result says so. Native OS dialogs (file pickers) still need a focused window.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1659,6 +1737,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: 'text', text: blocked }], isError: true };
         }
       }
+    }
+
+    // A real click cannot be delivered to a window that does not have OS focus:
+    // the extension simply never answers, and the caller is left waiting out the
+    // whole timeout on an action that may already have committed. Route those
+    // clicks through a synthetic pointer sequence instead — it works on
+    // background tabs, and on zero-sized viewports too, since it never hit-tests.
+    if (name === 'firefox_click') {
+      const synthetic = await clickWithoutFocus(commandParams);
+      if (synthetic) return synthetic;
     }
 
     // Bug 3: Refresh heartbeat before the async wait to prevent orphan timeout during long operations
