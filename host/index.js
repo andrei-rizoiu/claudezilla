@@ -391,10 +391,10 @@ function startSocketServer() {
     log('CLI client connected');
 
     // Baseline idle timeout — close sockets that connect but never send commands.
-    // Per-command timeouts override this via socket.setTimeout() in handleCliCommand.
+    // Once a command arrives the data handler below raises this to cover it.
     socket.setTimeout(60000);
     socket.on('timeout', () => {
-      log('Socket idle timeout (60s) — closing');
+      log(`Socket idle timeout (${socket.timeout}ms) — closing`);
       socket.destroy();
     });
 
@@ -432,6 +432,17 @@ function startSocketServer() {
           const { command, params = {}, authToken } = parsed;
 
           log(`CLI command: ${command}`);
+
+          // Extend the socket's idle timeout to cover this command. The 60s
+          // baseline set above is only meant for sockets that connect and
+          // never send anything; without this a long-running command (a click
+          // the extension never answers) has its socket destroyed at 60s
+          // BEFORE the per-request timer below can report the timeout, and the
+          // caller is left with a closed socket and no response.
+          const socketTimeoutMs = (params && params._timeout >= 5000 && params._timeout <= 300000)
+            ? params._timeout + 5000
+            : 155000;
+          socket.setTimeout(socketTimeoutMs);
 
           handleCliCommand(command, params, authToken, (response) => {
             socket.write(JSON.stringify(response) + '\n');

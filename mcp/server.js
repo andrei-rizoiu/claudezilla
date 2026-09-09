@@ -500,9 +500,24 @@ function sendCommandOnce(command, params = {}) {
           const response = JSON.parse(buffer.trim());
           resolved = true;
           resolve(response);
+          return;
         } catch (e) {
           console.error('Parse error in close handler:', e.message);
         }
+      }
+      // Socket closed with no usable response — e.g. the host's own idle
+      // timeout fired while a command was still in flight with the extension.
+      // Settle the promise here or the caller hangs forever: 'timeout' never
+      // fires on a closed socket, so this is the last chance to reject.
+      if (!resolved) {
+        resolved = true;
+        const err = new Error(
+          `Claudezilla host closed the connection without responding (command: ${command}). ` +
+          `The extension may never have answered — check the host log next to ${SOCKET_PATH}.`
+        );
+        err.code = 'HOST_CLOSED';
+        cleanup();
+        reject(err);
       }
     });
 
