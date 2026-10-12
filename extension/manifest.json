@@ -42,6 +42,20 @@
       ],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "*://teams.cloud.microsoft/*",
+        "*://teams.microsoft.com/*",
+        "*://*.teams.microsoft.com/*",
+        "*://web.whatsapp.com/*",
+        "*://*.concursolutions.com/*"
+      ],
+      "js": [
+        "visibility-shim.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "browser_action": {
