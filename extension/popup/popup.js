@@ -81,7 +81,7 @@ async function saveSettings() {
 async function loadWindowSettings() {
   try {
     const stored = await browser.storage.local.get('adoptCurrentWindow');
-    adoptCurrentWindowCheckbox.checked = stored.adoptCurrentWindow !== false;
+    adoptCurrentWindowCheckbox.checked = stored.adoptCurrentWindow === true; // local default: dedicated window
   } catch (e) {
     console.log('[claudezilla] Could not load window settings:', e.message);
   }
