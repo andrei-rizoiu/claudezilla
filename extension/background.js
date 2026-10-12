@@ -38,7 +38,7 @@ async function isPrivateModeRequired() {
   try {
     const stored = await browser.storage.local.get('claudezilla');
     const settings = stored.claudezilla || {};
-    return settings.privateMode !== false; // default true
+    return settings.privateMode === true; // local default: false (logged-in sessions)
   } catch {
     return true;
   }
@@ -1193,7 +1193,8 @@ async function handleCliCommand(message) {
           if (!usePrivate) {
             try {
               const adoptPref = await browser.storage.local.get('adoptCurrentWindow');
-              if (adoptPref.adoptCurrentWindow !== false) {
+              // local default: a dedicated window (opt in to adoption)
+              if (adoptPref.adoptCurrentWindow === true) {
                 const lastFocused = await browser.windows.getLastFocused({ windowTypes: ['normal'] });
                 if (lastFocused && !lastFocused.incognito) {
                   win = lastFocused;
