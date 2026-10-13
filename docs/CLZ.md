@@ -1,11 +1,12 @@
 # CLZ — Claudezilla Documentation Index
 
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-10-12
 
 ---
 
 ## Recent Documents
 
+- [[CLZ028 v0.7.2 PR 26-29 Review Findings]] (2026-10-12) — Pre-merge review of PRs #26–#29 for v0.7.2: RAF wait bound, adopted-window focus, CLAUDEZILLA_IPC_DIR, CLAUDEZILLA_AUTOSTART_CMD
 - [[CLZ027 v0.7.1 Release Reference]] (2026-10-08) — v0.7.1 release: pointer-sequence clicks (PR #25), IPC settle (PR #23), community PRs merged, retroactive v0.7.0 tag, AMO push
 - [[CLZ026 v0.7.0 Multi-Harness Release Reference]] (2026-09-09) — The multi-harness release: Oh My Pi, Hermes, Pi, eager tool discovery, PR #22 evaluate race fix, truncation metadata
 - [[CLZ025 Community Review Findings for v0.7.0 Planning]] (2026-09-05) — Architectural evaluation of PR #21 and Issue #19, multi-harness surface requirements
@@ -40,12 +41,16 @@
 - [[CLZ018 Consent Overlay Automation Sprint]]
 - [[CLZ015 v0.6.0 QA Gap Fixes Sprint]]
 
+### Community Review
+- [[CLZ028 v0.7.2 PR 26-29 Review Findings]]
+
 ---
 
 ## Full Document List
 
 | Doc | Date | Status | Topic |
 |-----|------|--------|-------|
+| CLZ028 | 2026-10-12 | Complete | v0.7.2 preparatory review of PRs #26–#29 (no merges) |
 | CLZ027 | 2026-10-08 | Complete | v0.7.1 release (pointer-sequence click, IPC settle, AMO push) |
 | CLZ026 | 2026-09-09 | Complete | v0.7.0 multi-harness release (OMP, Hermes, Pi, eager tools, PR #22 fix) |
 | CLZ025 | 2026-09-05 | Complete | Community review findings for v0.7.0 planning |
