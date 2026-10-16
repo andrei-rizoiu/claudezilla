@@ -552,6 +552,9 @@ async function sendCommand(command, params = {}) {
  * Returns false if extension is in Private Windows mode
  */
 async function canNavigate() {
+  // A tool-list probe must never start a browser (CLAUDEZILLA_AUTOSTART_CMD):
+  // with no host socket there is nothing to ask, so fail open as below.
+  if (!existsSync(SOCKET_PATH)) return true;
   try {
     const response = await sendCommand('canNavigate');
     return response.result?.canNavigate ?? true;
