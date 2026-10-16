@@ -1010,8 +1010,10 @@ async function handleCliCommand(message) {
         break;
 
       case 'canNavigate': {
-        // Check if navigate command is available (disabled if in private windows mode)
-        const allowed = await canRunInPrivateWindows();
+        // Check if navigate command is available. The private-window gate only
+        // applies when private mode is required; with privateMode: false (local
+        // default) navigate only touches Claudezilla's own normal-window tabs.
+        const allowed = !(await isPrivateModeRequired()) || await canRunInPrivateWindows();
         result = { canNavigate: allowed };
         break;
       }
@@ -1048,8 +1050,9 @@ async function handleCliCommand(message) {
 
         // No tabId: navigate active tab (original behavior with restrictions)
         // SECURITY: Disable when extension is allowed in private windows
-        // to prevent agents from creating non-private windows
-        if (await canRunInPrivateWindows()) {
+        // to prevent agents from creating non-private windows (only when private
+        // mode is required; getSession() still enforces the window mode)
+        if (await isPrivateModeRequired() && await canRunInPrivateWindows()) {
           throw new Error('SECURITY: firefox_navigate is disabled when extension runs in Private Windows. This prevents creating non-private windows. Use firefox_create_window or provide a tabId to navigate an existing tab.');
         }
 
