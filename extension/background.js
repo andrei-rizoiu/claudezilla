@@ -1855,6 +1855,28 @@ async function handleCliCommand(message) {
         break;
       }
 
+      case 'quitBrowser': {
+        // Clean quit: closing the last window makes Firefox write its session store
+        // and cache index, which a signal does not (ESR has no SIGTERM handler).
+        // The Claudezilla window closes last, so it is the one restored next start.
+        // Reply first: the extension dies with the last window.
+        const windows = await browser.windows.getAll();
+        const keepId = claudezillaWindow?.windowId;
+        const order = windows.map(w => w.id).sort((a, b) => (a === keepId) - (b === keepId));
+        setTimeout(async () => {
+          for (const [i, id] of order.entries()) {
+            // Let the session store file the others as closed windows before
+            // the last close starts the quit; otherwise it restores one of them.
+            if (i === order.length - 1 && order.length > 1) {
+              await new Promise(r => setTimeout(r, 1500));
+            }
+            try { await browser.windows.remove(id); } catch (e) {}
+          }
+        }, 200);
+        result = { quitting: true, windows: order.length };
+        break;
+      }
+
       case 'getWindows': {
         const windows = await browser.windows.getAll({ populate: true });
         result = windows.map(w => ({

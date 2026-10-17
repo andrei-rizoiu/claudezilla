@@ -101,6 +101,8 @@ const ALLOWED_COMMANDS = new Set([
   'setPrivateMode',
   // Session cleanup
   'goodbye',
+  // Clean quit (local: background browser only, see handleCliCommand)
+  'quitBrowser',
   // Consent automation
   'handleConsent',
   // Window mode query
@@ -311,6 +313,13 @@ function handleCliCommand(command, params, authToken, callback, socketRequests) 
   // SECURITY: Reject non-whitelisted commands
   if (!ALLOWED_COMMANDS.has(command)) {
     callback({ success: false, error: `Command not allowed: ${command}` });
+    return;
+  }
+
+  // quitBrowser closes every window. Only a browser with its own IPC dir (the
+  // background one, started by systemd) may be quit this way, never the user's main browser.
+  if (command === 'quitBrowser' && !process.env.CLAUDEZILLA_IPC_DIR) {
+    callback({ success: false, error: 'quitBrowser is only allowed with CLAUDEZILLA_IPC_DIR set' });
     return;
   }
 
