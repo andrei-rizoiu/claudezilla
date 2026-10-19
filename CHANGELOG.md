@@ -28,6 +28,11 @@
   `firefox_evaluate` stays behind the extension's own opt-in.
 - **Configurable Idle-Agent Cleanup (#31)** — `CLAUDEZILLA_AGENT_TIMEOUT_MS=0` now
   disables the idle-agent reaper entirely.
+- **On-Demand Browser Start (#29)** — `CLAUDEZILLA_AUTOSTART_CMD` starts the browser when
+  the host is not reachable. The command is an argv vector run without a shell, the
+  readiness check is a connection attempt (so it works with the Windows named pipe),
+  concurrent calls share one launch, and a failed start is throttled instead of
+  respawning on every call.
 
 ### Maintenance
 

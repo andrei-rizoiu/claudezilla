@@ -52,6 +52,9 @@ No manual config required — restart Claude Code and you're ready.
 | Variable | Scope | Purpose |
 |----------|-------|---------|
 | `CLAUDEZILLA_IPC_DIR` | POSIX only | Directory that holds the IPC socket, auth token and debug log. Set it to run two browsers side by side (for example a visible profile and a headless profile) without the most recently started one taking over the other's socket. |
+| `CLAUDEZILLA_AUTOSTART_CMD` | all platforms | Command that starts the browser when the host is not running. Never run through a shell. |
+| `CLAUDEZILLA_AUTOSTART_WAIT_MS` | all platforms | How long to wait for the host to bind its socket after a start (default `45000`). |
+| `CLAUDEZILLA_AUTOSTART_RETRY_COOLDOWN_MS` | all platforms | How long to wait before retrying a failed start (default `60000`). |
 
 `CLAUDEZILLA_IPC_DIR` in detail:
 
@@ -68,6 +71,20 @@ CLAUDEZILLA_IPC_DIR=/run/user/1000/claudezilla-bg firefox --no-remote --profile 
 # MCP server that drives that browser
 CLAUDEZILLA_IPC_DIR=/run/user/1000/claudezilla-bg claude
 ```
+
+`CLAUDEZILLA_AUTOSTART_CMD` in detail:
+
+- **Never a shell.** The value is an argv vector, executed with `execFile(..., { shell: false })`. A JSON array is the exact form:
+  ```bash
+  CLAUDEZILLA_AUTOSTART_CMD='["systemctl","--user","start","claudezilla-background"]'
+  ```
+  A plain string is split on whitespace and is not interpreted by a shell:
+  ```bash
+  CLAUDEZILLA_AUTOSTART_CMD='systemctl --user start claudezilla-background'
+  ```
+- The browser is started only when the host is **not reachable**. The check is a connection attempt, not a file check, so it also works on Windows, where the host socket is a named pipe rather than a file.
+- Concurrent calls share a single launch, and a failed start is not retried for `CLAUDEZILLA_AUTOSTART_RETRY_COOLDOWN_MS` — a browser that cannot start does not turn every tool call into another process.
+- The start command must publish the host socket and auth token where the MCP server looks for them. When the browser and the MCP server are different processes, give both the same `CLAUDEZILLA_IPC_DIR`.
 
 ## What Can Claude Do?
 
