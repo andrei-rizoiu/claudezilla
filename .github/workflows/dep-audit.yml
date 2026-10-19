@@ -74,38 +74,71 @@ jobs:
           info()   { append "INFO: $1"; }
 
           # ---- npm audit ------------------------------------------------
-          if [ -f package.json ]; then
-            echo "::group::npm audit"
-            info "npm project detected"
+          # The blocking check covers RUNTIME dependencies only: the code that
+          # ships to a user's machine (the MCP server's @modelcontextprotocol/sdk
+          # and any future runtime dependency). Development dependencies are
+          # build and test tooling (web-ext); their advisories never reach the
+          # user, so they are reported as advisories instead of failing the
+          # gate. The affected package names are read with a here-string, not a
+          # pipe, so the loop stays in this shell and FINDINGS keeps them.
+          NPM_PROJECTS=""
+          for d in . mcp host; do
+            if [ -f "$d/package.json" ]; then NPM_PROJECTS="${NPM_PROJECTS} $d"; fi
+          done
 
-            # Install without running scripts to populate node_modules
-            npm ci --ignore-scripts --no-audit 2>/dev/null || \
-              npm install --ignore-scripts --no-audit 2>/dev/null || true
+          for PROJECT in $NPM_PROJECTS; do
+            echo "::group::npm audit ($PROJECT)"
+            info "npm project detected: $PROJECT"
 
-            npm audit --json > /tmp/npm-audit.json 2>&1 || true
+            (
+              cd "$PROJECT"
+              # Install without running scripts to populate node_modules
+              npm ci --ignore-scripts --no-audit 2>/dev/null || \
+                npm install --ignore-scripts --no-audit 2>/dev/null || true
 
-            # Parse HIGH / CRITICAL counts from audit JSON
+              npm audit --omit=dev --json > /tmp/npm-audit-prod.json 2>&1 || true
+              npm audit --json > /tmp/npm-audit-all.json 2>&1 || true
+            )
+
+            # Runtime findings block the gate
             HIGH=$(jq '[.vulnerabilities // {} | to_entries[].value
                         | select(.severity == "high")] | length' \
-                        /tmp/npm-audit.json 2>/dev/null || echo 0)
+                        /tmp/npm-audit-prod.json 2>/dev/null || echo 0)
             CRIT=$(jq '[.vulnerabilities // {} | to_entries[].value
                         | select(.severity == "critical")] | length' \
-                        /tmp/npm-audit.json 2>/dev/null || echo 0)
+                        /tmp/npm-audit-prod.json 2>/dev/null || echo 0)
 
-            info "npm audit: high=${HIGH} critical=${CRIT}"
+            # Dev-only findings are advisory
+            DEV_HIGH=$(jq '[.vulnerabilities // {} | to_entries[].value
+                        | select(.severity == "high")] | length' \
+                        /tmp/npm-audit-all.json 2>/dev/null || echo 0)
+            DEV_CRIT=$(jq '[.vulnerabilities // {} | to_entries[].value
+                        | select(.severity == "critical")] | length' \
+                        /tmp/npm-audit-all.json 2>/dev/null || echo 0)
+
+            info "npm audit ($PROJECT): runtime high=${HIGH} critical=${CRIT}; dev-only high=${DEV_HIGH} critical=${DEV_CRIT}"
 
             if [ "$HIGH" -gt 0 ] || [ "$CRIT" -gt 0 ]; then
-              fail "npm audit found ${HIGH} high and ${CRIT} critical vulnerabilities"
-              # Surface the affected package names
-              jq -r '.vulnerabilities // {} | to_entries[]
+              fail "npm audit ($PROJECT) found ${HIGH} high and ${CRIT} critical in RUNTIME dependencies"
+              while IFS= read -r line; do
+                if [ -n "$line" ]; then append "$line"; fi
+              done < <(jq -r '.vulnerabilities // {} | to_entries[]
                      | select(.value.severity == "high" or .value.severity == "critical")
                      | "  - \(.key) [\(.value.severity)]"' \
-                     /tmp/npm-audit.json 2>/dev/null | while read line; do
-                append "$line"
-              done
+                     /tmp/npm-audit-prod.json 2>/dev/null)
+            fi
+
+            if [ "$DEV_HIGH" -gt 0 ] || [ "$DEV_CRIT" -gt 0 ]; then
+              info "advisory: npm audit ($PROJECT) found ${DEV_HIGH} high and ${DEV_CRIT} critical in dev-only dependencies (not shipped to users)"
+              while IFS= read -r line; do
+                if [ -n "$line" ]; then append "$line"; fi
+              done < <(jq -r '.vulnerabilities // {} | to_entries[]
+                     | select(.value.severity == "high" or .value.severity == "critical")
+                     | "  - \(.key) [\(.value.severity)] (dev-only)"' \
+                     /tmp/npm-audit-all.json 2>/dev/null)
             fi
             echo "::endgroup::"
-          fi
+          done
 
           # ---- pip-audit ------------------------------------------------
           PYTHON_PROJECT=0
