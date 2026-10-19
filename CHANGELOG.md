@@ -189,7 +189,7 @@ Compatibility and polish release. Claudezilla v0.6.4 predated ~6 weeks of Claude
 ### References
 
 - Claude Code CHANGELOG, "2.1.129–2.1.138," anthropics/claude-code GitHub.
-- See `docs/CLZ/CLZ021 v0.6.5 Claude Code Compatibility.md` for detailed gap analysis.
+- See `docs/clz/CLZ021 v0.6.5 Claude Code Compatibility.md` for detailed gap analysis.
 
 ## v0.6.4 (2026-03-31)
 
