@@ -34,6 +34,33 @@ function describeClickTarget(el) {
 }
 
 /**
+ * Resolve on the next animation frame, or after timeoutMs if no frame comes.
+ *
+ * Firefox does not run requestAnimationFrame callbacks in a tab or window the
+ * compositor is not painting (background tab, minimised window, another
+ * workspace on Wayland). An unbounded rAF wait then never settles and the
+ * command hangs until the host timeout, so every frame wait is bounded.
+ *
+ * @param {number} timeoutMs - Upper bound on the wait
+ * @returns {Promise<void>}
+ */
+function nextFrame(timeoutMs = 100) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    requestAnimationFrame(() => {
+      clearTimeout(timer);
+      finish();
+    });
+  });
+}
+
+/**
  * Wait until the element stops moving, e.g. after
  * scrollIntoView({ behavior: 'smooth' }). Two animation frames are not
  * enough for a smooth scroll; measuring mid-scroll aims the click at
@@ -41,13 +68,14 @@ function describeClickTarget(el) {
  *
  * @param {Element} element
  * @param {number} maxFrames - Upper bound (~1s at 60 fps)
+ * @param {number} frameTimeoutMs - Upper bound on a single frame wait
  * @returns {Promise<void>}
  */
-async function waitForStableRect(element, maxFrames = 60) {
+async function waitForStableRect(element, maxFrames = 60, frameTimeoutMs = 100) {
   let prev = null;
   let stableFrames = 0;
   for (let i = 0; i < maxFrames; i++) {
-    await new Promise(resolve => requestAnimationFrame(resolve));
+    await nextFrame(frameTimeoutMs);
     const r = element.getBoundingClientRect();
     if (prev && r.top === prev.top && r.left === prev.left) {
       if (++stableFrames >= 2) return;

@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
 const contentSource = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+// pointer-click.js is loaded before content.js in the manifest
+// (extension/manifest.json content_scripts), so it must be loaded first here
+// too: content.js calls nextFrame() and dispatchPointerClick() from it.
+const pointerClickSource = readFileSync(new URL('../extension/pointer-click.js', import.meta.url), 'utf8');
 
 function createContentScriptHarness({ storageDelayMs = 20, initialAllowEvaluate = true } = {}) {
   let runtimeListener = null;
@@ -114,6 +118,7 @@ function createContentScriptHarness({ storageDelayMs = 20, initialAllowEvaluate 
     },
   });
 
+  vm.runInContext(pointerClickSource, context);
   vm.runInContext(contentSource, context);
 
   return {

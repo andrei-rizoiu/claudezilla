@@ -194,6 +194,8 @@ describe('waitForStableRect', () => {
     let frame = 0;
     const context = {
       requestAnimationFrame: (cb) => { frame += 1; setImmediate(cb); },
+      setTimeout,
+      clearTimeout,
     };
     vm.createContext(context);
     vm.runInContext(source, context);
@@ -207,7 +209,7 @@ describe('waitForStableRect', () => {
 
   it('gives up after maxFrames when the element never settles', async () => {
     let frame = 0;
-    const context = { requestAnimationFrame: (cb) => { frame += 1; setImmediate(cb); } };
+    const context = { requestAnimationFrame: (cb) => { frame += 1; setImmediate(cb); }, setTimeout, clearTimeout };
     vm.createContext(context);
     vm.runInContext(source, context);
     const el = { getBoundingClientRect: () => ({ top: frame, left: 0 }) };
@@ -215,5 +217,40 @@ describe('waitForStableRect', () => {
     await context.waitForStableRect(el, 10);
 
     assert.equal(frame, 10);
+  });
+
+  it('settles when the tab is not painted and no animation frame ever fires', async () => {
+    // Background tab, minimised window, or another Wayland workspace:
+    // requestAnimationFrame callbacks are never run.
+    const context = { requestAnimationFrame: () => {}, setTimeout, clearTimeout };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    const el = { getBoundingClientRect: () => ({ top: 300, left: 10 }) };
+
+    const outcome = await Promise.race([
+      context.waitForStableRect(el).then(() => 'settled'),
+      new Promise(resolve => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+
+    assert.equal(outcome, 'settled');
+  });
+
+  it('honours a caller-supplied frame timeout', async () => {
+    // The per-iteration bound is a parameter: a caller that needs a tighter
+    // budget than the 100 ms default can pass one in.
+    const context = { requestAnimationFrame: () => {}, setTimeout, clearTimeout };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    const el = { getBoundingClientRect: () => ({ top: 300, left: 10 }) };
+
+    const started = Date.now();
+    await Promise.race([
+      context.waitForStableRect(el, 3, 10),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('hung')), 2000)),
+    ]);
+    const elapsed = Date.now() - started;
+
+    // 3 iterations x 10 ms bound, not 3 x 100 ms default
+    assert.ok(elapsed < 200, `waited ${elapsed} ms, expected the 10 ms bound to apply`);
   });
 });
