@@ -18,10 +18,10 @@ function event() {
   };
 }
 
-function createHarness({ storage: initialStorage = {}, windowGetGate = Promise.resolve() } = {}) {
+function createHarness({ storage: initialStorage = {}, windowGetGate = Promise.resolve(), allowTabCreate = false, tabs: seededTabs = null } = {}) {
   const storage = structuredClone(initialStorage);
-  const tabs = new Map([
-    [42, {
+  const tabs = new Map((seededTabs ?? [
+    {
       id: 42,
       windowId: 7,
       url: 'https://example.test/already-open',
@@ -29,9 +29,9 @@ function createHarness({ storage: initialStorage = {}, windowGetGate = Promise.r
       active: true,
       pinned: false,
       incognito: false,
-    }],
-  ]);
-  const calls = { tabsCreated: 0, windowsCreated: 0, contentActions: [] };
+    },
+  ]).map((tab) => [tab.id, { ...tab }]));
+  const calls = { tabsCreated: 0, windowsCreated: 0, contentActions: [], tabCreateOptions: [], captures: { tab: [], visible: [] } };
   let resolveWindowGetStarted;
   const windowGetStarted = new Promise((resolve) => { resolveWindowGetStarted = resolve; });
   const nativeMessages = event();
@@ -128,9 +128,27 @@ function createHarness({ storage: initialStorage = {}, windowGetGate = Promise.r
           .filter((tab) => !query.active || tab.active)
           .map((tab) => ({ ...tab }));
       },
-      async create() {
+      async create(options = {}) {
         calls.tabsCreated += 1;
-        throw new Error('test forbids creating tabs');
+        if (!allowTabCreate) throw new Error('test forbids creating tabs');
+        calls.tabCreateOptions.push(structuredClone(options));
+        const id = 100 + calls.tabsCreated;
+        const tab = {
+          id,
+          windowId: options.windowId,
+          url: options.url,
+          title: '',
+          active: options.active !== false,
+          pinned: false,
+          incognito: false,
+        };
+        if (tab.active) {
+          for (const other of tabs.values()) {
+            if (other.windowId === tab.windowId) other.active = false;
+          }
+        }
+        tabs.set(id, tab);
+        return { ...tab };
       },
       async update(tabId, changes) {
         const tab = tabs.get(Number(tabId));
@@ -148,10 +166,12 @@ function createHarness({ storage: initialStorage = {}, windowGetGate = Promise.r
       },
       async captureTab(tabId) {
         if (!tabs.has(Number(tabId))) throw new Error('tab not found');
+        calls.captures.tab.push(Number(tabId));
         return 'data:image/png;base64,captured';
       },
-      async captureVisibleTab() {
-        throw new Error('attached screenshots must use captureTab');
+      async captureVisibleTab(windowId) {
+        calls.captures.visible.push(windowId === undefined ? null : windowId);
+        return 'data:image/png;base64,visible';
       },
     },
     tabGroups: {
@@ -263,6 +283,8 @@ describe('attached user tabs', () => {
     assert.equal(screenshot.success, true, screenshot.error);
     assert.equal(screenshot.result.tabId, 42);
     assert.equal(screenshot.result.dataUrl, 'data:image/png;base64,captured');
+    assert.deepEqual(harness.calls.captures.tab, [42]);
+    assert.deepEqual(harness.calls.captures.visible, []);
     assert.equal(harness.calls.tabsCreated, 0);
     assert.equal(harness.calls.windowsCreated, 0);
   });
@@ -355,5 +377,103 @@ describe('attached user tabs', () => {
 
     assert.equal(response.success, false);
     assert.match(response.error, /managed Claudezilla pool/);
+  });
+});
+
+describe('adopted window tab selection', () => {
+  it('does not switch the user\'s selected tab when adding an agent tab to an adopted window', async () => {
+    const harness = createHarness({
+      allowTabCreate: true,
+      storage: {
+        claudezillaWindowState: {
+          windowId: 7,
+          tabs: [{ tabId: 42, ownerId: 'agent-a' }],
+          createdAt: 1,
+          groupId: null,
+          isPrivate: false,
+          adopted: true,
+        },
+      },
+    });
+
+    const created = await harness.command('createWindow', {
+      url: 'https://example.test/agent',
+      agentId: 'agent-b',
+    });
+
+    assert.equal(created.success, true, created.error);
+    assert.equal(harness.calls.tabCreateOptions.length, 1);
+    assert.equal(harness.calls.tabCreateOptions[0].active, false);
+    assert.equal((await harness.browser.tabs.get(42)).active, true);
+  });
+
+  it('in an adopted window, firefox_screenshot captures the agent tab, not the user\'s visible tab', async () => {
+    const harness = createHarness({
+      tabs: [
+        { id: 42, windowId: 7, url: 'https://example.test/user', title: 'User page', active: true, pinned: false, incognito: false },
+        { id: 100, windowId: 7, url: 'https://example.test/agent', title: 'Agent page', active: false, pinned: false, incognito: false },
+      ],
+      storage: {
+        claudezillaWindowState: {
+          windowId: 7,
+          tabs: [{ tabId: 100, ownerId: 'agent-a' }],
+          createdAt: 1,
+          groupId: null,
+          isPrivate: false,
+          adopted: true,
+        },
+      },
+    });
+    await harness.windowGetStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const screenshot = await harness.command('screenshot', {
+      agentId: 'agent-a',
+      skipReadiness: true,
+      format: 'png',
+      scale: 1,
+    });
+
+    assert.equal(screenshot.success, true, screenshot.error);
+    assert.equal(screenshot.result.tabId, 100);
+    assert.equal(screenshot.result.dataUrl, 'data:image/png;base64,captured');
+    // The agent's tab was captured directly; the user's visible tab was not.
+    assert.deepEqual(harness.calls.captures.tab, [100]);
+    assert.deepEqual(harness.calls.captures.visible, []);
+    // The user's selection was never taken over.
+    assert.equal((await harness.browser.tabs.get(42)).active, true);
+  });
+
+  it('in a dedicated window, firefox_screenshot still uses captureVisibleTab for the selected tab', async () => {
+    const harness = createHarness({
+      tabs: [
+        { id: 100, windowId: 7, url: 'https://example.test/agent', title: 'Agent page', active: true, pinned: false, incognito: false },
+      ],
+      storage: {
+        claudezillaWindowState: {
+          windowId: 7,
+          tabs: [{ tabId: 100, ownerId: 'agent-a' }],
+          createdAt: 1,
+          groupId: null,
+          isPrivate: false,
+          adopted: false,
+        },
+      },
+    });
+    await harness.windowGetStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const screenshot = await harness.command('screenshot', {
+      agentId: 'agent-a',
+      skipReadiness: true,
+      format: 'png',
+      scale: 1,
+    });
+
+    assert.equal(screenshot.success, true, screenshot.error);
+    assert.equal(screenshot.result.tabId, 100);
+    assert.equal(screenshot.result.dataUrl, 'data:image/png;base64,visible');
+    assert.deepEqual(harness.calls.captures.visible, [7]);
+    assert.deepEqual(harness.calls.captures.tab, []);
   });
 });

@@ -1129,11 +1129,12 @@ async function handleCliCommand(message) {
             }
           }
 
-          // Create new tab in existing window
+          // Create new tab in existing window. In an ADOPTED window the
+          // selected tab is the user's: never switch it away.
           const newTab = await browser.tabs.create({
             windowId: claudezillaWindow.windowId,
             url: url || 'about:blank',
-            active: true
+            active: !claudezillaWindow.adopted
           });
           tabId = newTab.id;
           claudezillaWindow.tabs.push({ tabId, ownerId });
@@ -1847,6 +1848,7 @@ async function handleCliCommand(message) {
           try {
             let session = null;
             let screenshotReadiness = null;
+            let selectedTabId = null;
             const targetTabId = resolvedRequestedTabId || activeTabId;
             const attachedCapture = isAttachedTab(targetTabId);
 
@@ -1857,12 +1859,18 @@ async function handleCliCommand(message) {
                 throw new Error(`Tab ${resolvedRequestedTabId} not found in Claudezilla window. Available tabs: ${tabIds.join(', ')}`);
               }
 
-              // Managed-pool screenshots still use captureVisibleTab, so the
-              // requested tab must be active in the managed window.
-              if (targetTabId && targetTabId !== activeTabId) {
-                await browser.tabs.update(targetTabId, { active: true });
-                activeTabId = targetTabId;
+              // The browser's SELECTED tab in the session window — not
+              // Claudezilla's own `activeTabId`. In an adopted (user) window
+              // the two differ: the agent's tab is created inactive so the
+              // user's selection is never taken over, so `activeTabId` can
+              // name a tab the browser is not showing.
+              const [selectedTab] = await browser.tabs.query({ active: true, windowId: session.windowId });
+              selectedTabId = selectedTab?.id ?? null;
 
+              if (targetTabId && targetTabId !== selectedTabId) {
+                // The requested tab is not the visible one. Capture that tab
+                // directly (Firefox can capture a background tab) instead of
+                // switching the user's selection and capturing the window.
                 if (!skipReadiness) {
                   screenshotReadiness = await waitForPageReady(targetTabId, {
                     maxWait,
@@ -1870,10 +1878,9 @@ async function handleCliCommand(message) {
                   });
                 }
 
-                const [currentActive] = await browser.tabs.query({ active: true, windowId: session.windowId });
-                if (currentActive?.id !== targetTabId) {
-                  throw new Error(`Screenshot race: tab ${targetTabId} was switched away during capture`);
-                }
+                // The captured tab becomes the agent's current tab, so a
+                // later command without an explicit tabId targets it.
+                activeTabId = targetTabId;
               } else if (!skipReadiness) {
                 screenshotReadiness = await waitForPageReady(targetTabId, {
                   maxWait: Math.min(maxWait, 2000),
@@ -1905,7 +1912,21 @@ async function handleCliCommand(message) {
               if (annResp.success) annotationLabels = annResp.result.labels;
             }
 
-            const rawDataUrl = attachedCapture
+            if (!attachedCapture && targetTabId === selectedTabId) {
+              // The user may have switched tabs while we waited for the page
+              // to settle. captureVisibleTab can only capture the window's
+              // visible tab, so re-check the selection right before capture.
+              const [currentSelected] = await browser.tabs.query({ active: true, windowId: session.windowId });
+              if (currentSelected?.id !== targetTabId) {
+                throw new Error(`Screenshot race: tab ${targetTabId} was switched away during capture`);
+              }
+            }
+
+            // Firefox's captureTab can capture a tab that is not the selected
+            // one, without changing the user's selection. captureVisibleTab
+            // can only capture the window's visible tab, so it is used only
+            // when the target IS the selected tab.
+            const rawDataUrl = (attachedCapture || targetTabId !== selectedTabId)
               ? await browser.tabs.captureTab(targetTabId, captureOpts)
               : await browser.tabs.captureVisibleTab(session.windowId, captureOpts);
 
