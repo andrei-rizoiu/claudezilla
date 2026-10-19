@@ -40,9 +40,12 @@ cd claudezilla
 The installer automatically:
 - Installs the native messaging host
 - Runs `npm install` for MCP dependencies
-- Configures Claude Code MCP settings (`~/.claude/mcp.json`)
+- Registers the MCP server with Claude Code (`claude mcp add --scope user`)
+- Allows the Claudezilla tools in `~/.claude/settings.json` (`firefox_evaluate` is excluded by default — see below)
 
 No manual config required — restart Claude Code and you're ready.
+
+`firefox_evaluate` is deliberately not in the allow-list: it runs JavaScript in the page, so it stays behind the extension's own opt-in (**Claudezilla popup → Settings → Allow JavaScript evaluation**). To let Claude Code call it, add `"mcp__claudezilla__firefox_evaluate"` to `permissions.allow` in `~/.claude/settings.json` once you have enabled that toggle.
 
 ## Environment Variables
 
