@@ -5,9 +5,9 @@
 
 ## v0.7.2 (2026-10-19)
 
-**Bounded frame waits, adopted-window politeness, correct MCP registration — community PRs #26, #27, #28, #30, plus issue #31.**
+**Bounded frame waits, adopted-window politeness, correct MCP registration — community PRs #26, #27, #28, #29, #30, plus issues #24 and #31.**
 
-### Fixes & Improvements
+### Community Contributions
 
 - **Bounded Animation-Frame Waits (PR #26, @andrei-rizoiu)** — `firefox_click` and
   `firefox_wait_for` settle in an unpainted tab (background tab, minimised window, another
@@ -20,31 +20,43 @@
 - **`CLAUDEZILLA_IPC_DIR` (PR #28, @andrei-rizoiu)** — POSIX-only override that isolates
   the socket, auth token and debug log, so a visible profile and a headless profile can
   run side by side without one taking over the other's socket.
-- **MCP Registration via `claude mcp add` (PR #30, @flo-dhalluin, fixes #24)** — the
+- **On-Demand Browser Start (PR #29, @andrei-rizoiu)** — `CLAUDEZILLA_AUTOSTART_CMD`
+  starts the browser when the host is not reachable. The command is an argv vector run
+  without a shell, the readiness check is a connection attempt (so it works with the
+  Windows named pipe), concurrent calls share one launch, and a failed start is throttled
+  instead of respawning on every call.
+- **MCP Registration via `claude mcp add` (PR #30 by @flo-dhalluin — Florent D'halluin,
+  commits as @flo-netheos; fixes #24)** — the
   installers register the server where Claude Code reads it (`~/.claude.json`), and the
   Windows installer writes its JSON without a BOM.
-- **`firefox_evaluate` Is No Longer Auto-Allowed (#24)** — the blanket
-  `mcp__claudezilla__*` permission is replaced by an explicit tool list, so
+
+### Fixes & Improvements
+
+- **The Screenshot Path Captures the Agent's Tab (#27, reported by @AdamWiley46)** — in an
+  adopted (user) window the capture returned the user's visible page: the path compared
+  the target against Claudezilla's own `activeTabId` instead of the browser's selected
+  tab, then captured the window. It now captures the requested tab directly.
+- **`firefox_evaluate` Is No Longer Auto-Allowed (#24, reported by @AdamWiley46)** — the
+  blanket `mcp__claudezilla__*` permission is replaced by an explicit tool list, so
   `firefox_evaluate` stays behind the extension's own opt-in.
-- **Configurable Idle-Agent Cleanup (#31)** — `CLAUDEZILLA_AGENT_TIMEOUT_MS=0` now
-  disables the idle-agent reaper entirely.
-- **On-Demand Browser Start (#29)** — `CLAUDEZILLA_AUTOSTART_CMD` starts the browser when
-  the host is not reachable. The command is an argv vector run without a shell, the
-  readiness check is a connection attempt (so it works with the Windows named pipe),
-  concurrent calls share one launch, and a failed start is throttled instead of
-  respawning on every call.
+- **Configurable Idle-Agent Cleanup (#31, reported by @AdamWiley46)** —
+  `CLAUDEZILLA_AGENT_TIMEOUT_MS=0` now disables the idle-agent reaper entirely.
+- **Dependency Advisory in the Shipped MCP SDK** — `@modelcontextprotocol/sdk` pinned at
+  1.32.1, past GHSA-6qxp-vccf-f47h; the dependency-audit gate now blocks on
+  runtime-dependency findings and reports dev-only findings as advisories.
 
 ### Maintenance
 
 - Version `0.7.1` → `0.7.2` across `package.json`, `host/package.json`, `mcp/package.json`,
   `extension/manifest.json`, `extension/popup/popup.html`, `CLAUDE.md`, `README.md`,
   `website/extension.html`, `website/changelog.html`.
-- Regression suite `tests/` — 60 tests, 0 failures.
+- Regression suite `tests/` — 75 tests, 0 failures.
 - Web extension artifact built at `web-ext-artifacts/claudezilla-0.7.2.zip`.
 
 ### References
 
 - [[CLZ030 v0.7.2 Release Plan and PR Review]]
+- [[CLZ031 Security Review Notes — Keyboard-Logger Permission Surface]]
 
 ## v0.7.1 (2026-10-08)
 
