@@ -290,10 +290,24 @@
               </div>
             </li>
             <li class="change-item">
+              <span class="change-tag tag-feat">feat</span>
+              <div class="change-text">
+                <strong>On-Demand Browser Start (PR #29)</strong>
+                <span class="detail">Thanks @andrei-rizoiu. <code>CLAUDEZILLA_AUTOSTART_CMD</code> starts the browser when the host is not reachable. The command is an argv vector run without a shell, the readiness check is a connection attempt, and a failed start is throttled instead of respawning on every call.</span>
+              </div>
+            </li>
+            <li class="change-item">
               <span class="change-tag tag-fix">fix</span>
               <div class="change-text">
                 <strong>MCP Registration via <code>claude mcp add</code> (PR #30, fixes #24)</strong>
-                <span class="detail">Thanks @flo-dhalluin. The installers register the server where Claude Code reads it, and the Windows installer writes its JSON without a BOM. <code>firefox_evaluate</code> is no longer auto-allowed — it stays behind the extension's opt-in.</span>
+                <span class="detail">Thanks @flo-dhalluin (Florent D'halluin). The installers register the server where Claude Code reads it, and the Windows installer writes its JSON without a BOM. <code>firefox_evaluate</code> is no longer auto-allowed — it stays behind the extension's opt-in.</span>
+              </div>
+            </li>
+            <li class="change-item">
+              <span class="change-tag tag-fix">fix</span>
+              <div class="change-text">
+                <strong>Configurable Idle-Agent Cleanup (#31)</strong>
+                <span class="detail">Reported by @AdamWiley46. <code>CLAUDEZILLA_AGENT_TIMEOUT_MS=0</code> now disables the idle-agent reaper entirely, instead of falling back to the 10-minute default.</span>
               </div>
             </li>
           </ul>
