@@ -5,6 +5,9 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync, statSync, chmodSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   validatePath,
   isWindows,
@@ -12,6 +15,10 @@ import {
   socketTimeoutMs,
   DEFAULT_COMMAND_TIMEOUT_MS,
   SOCKET_TIMEOUT_GRACE_MS,
+  getSafeTempDir,
+  getSocketPath,
+  getAuthTokenPath,
+  getDebugLogPath,
 } from '../host/ipc.js';
 
 describe('validatePath', () => {
@@ -82,5 +89,55 @@ describe('command timeout policy', () => {
     assert.equal(socketTimeoutMs({ _timeout: 30000 }), 30000 + SOCKET_TIMEOUT_GRACE_MS);
     assert.equal(socketTimeoutMs(), DEFAULT_COMMAND_TIMEOUT_MS + SOCKET_TIMEOUT_GRACE_MS);
     assert.ok(socketTimeoutMs({ _timeout: 30000 }) > commandTimeoutMs({ _timeout: 30000 }));
+  });
+});
+
+describe('CLAUDEZILLA_IPC_DIR', { skip: isWindows() }, () => {
+  function withOverride(value, fn) {
+    const saved = process.env.CLAUDEZILLA_IPC_DIR;
+    process.env.CLAUDEZILLA_IPC_DIR = value;
+    try {
+      fn();
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDEZILLA_IPC_DIR;
+      else process.env.CLAUDEZILLA_IPC_DIR = saved;
+    }
+  }
+
+  it('puts the socket, token and debug log in the override directory, creating it', () => {
+    const base = mkdtempSync(join(tmpdir(), 'cz-ipc-'));
+    const dir = join(base, 'second-browser');
+    try {
+      withOverride(dir, () => {
+        assert.equal(getSocketPath(), join(dir, 'claudezilla.sock'));
+        assert.equal(getAuthTokenPath(), join(dir, 'claudezilla-auth.token'));
+        assert.equal(getDebugLogPath(), join(dir, 'claudezilla-debug.log'));
+        assert.equal(statSync(dir).mode & 0o777, 0o700);
+      });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('chmods an existing override directory to 0700', () => {
+    const base = mkdtempSync(join(tmpdir(), 'cz-ipc-'));
+    const dir = join(base, 'existing');
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
+    try {
+      withOverride(dir, () => {
+        assert.equal(getSocketPath(), join(dir, 'claudezilla.sock'));
+      });
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the default location when the override is invalid', () => {
+    withOverride('/tmp/../etc', () => {
+      assert.notEqual(getSocketPath(), '/tmp/../etc/claudezilla.sock');
+      assert.equal(getSocketPath(), join(getSafeTempDir(), 'claudezilla.sock'));
+    });
   });
 });

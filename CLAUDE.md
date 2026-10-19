@@ -50,6 +50,7 @@ claudezilla@boot.industries
 - Max message: 1MB (host->ext), 4GB (ext->host)
 - All tools support optional `timeout` (5000-300000 ms, default: 150000)
 - **Socket path:** XDG_RUNTIME_DIR -> `~/.claudezilla/` (mode 0700) -> tmpdir()
+- **Override (POSIX only):** `CLAUDEZILLA_IPC_DIR` puts the socket, auth token and debug log in that directory (mode 0700; an existing directory is chmod'ed to 0700). The host is launched by Firefox and inherits the *browser's* environment, while the MCP server resolves the path from *its own* environment at module load — so both must carry the same value, and the MCP server must be restarted after a change. Windows uses a fixed named pipe and a `%LOCALAPPDATA%` token path, so the variable is ignored there.
 - **Windows:** `host.bat` wrapper (not `args` manifest field)
 
 ## Commands
