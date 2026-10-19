@@ -44,6 +44,28 @@ The installer automatically:
 
 No manual config required — restart Claude Code and you're ready.
 
+## Environment Variables
+
+| Variable | Scope | Purpose |
+|----------|-------|---------|
+| `CLAUDEZILLA_IPC_DIR` | POSIX only | Directory that holds the IPC socket, auth token and debug log. Set it to run two browsers side by side (for example a visible profile and a headless profile) without the most recently started one taking over the other's socket. |
+
+`CLAUDEZILLA_IPC_DIR` in detail:
+
+- **POSIX only** (macOS/Linux). On Windows the host uses a fixed named pipe (`\\.\pipe\claudezilla`) and a `%LOCALAPPDATA%` token path, so the variable is ignored there.
+- The directory is created with mode `0700` when missing, and an existing directory is tightened to `0700`.
+- **Both processes need the same value.** The native messaging host is launched by Firefox and inherits the *browser's* environment; the MCP server resolves the socket path from *its own* environment at startup. Export the variable before launching Firefox **and** before starting Claude Code.
+- **Restart the MCP server** after changing it — the path is resolved once at module load.
+- An invalid value (path traversal, null byte) is ignored with a warning and the default location is used.
+
+```bash
+# browser (and the native host it launches)
+CLAUDEZILLA_IPC_DIR=/run/user/1000/claudezilla-bg firefox --no-remote --profile ~/profiles/headless
+
+# MCP server that drives that browser
+CLAUDEZILLA_IPC_DIR=/run/user/1000/claudezilla-bg claude
+```
+
 ## What Can Claude Do?
 
 | Capability | Description |
