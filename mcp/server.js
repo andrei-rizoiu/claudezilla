@@ -18,6 +18,7 @@ import { readFileSync, existsSync, statSync, writeFileSync } from 'fs';
 import { resolve as resolvePath, extname } from 'path';
 import { getSocketPath, getAuthTokenPath } from '../host/ipc.js';
 import { requestOverSocket } from './socket-request.js';
+import { createAgentReaper, resolveAgentTimeout } from './agent-reaper.js';
 
 // Single source of truth for the MCP server version. Reading from
 // package.json at module load keeps the version response in sync with the
@@ -183,67 +184,36 @@ function diffPageState(before, after) {
   return diff;
 }
 
-// Agent heartbeat tracking for orphaned tab cleanup
-const agentHeartbeats = new Map(); // agentId -> lastSeenTimestamp
-// Agent is considered dead after this. Override with CLAUDEZILLA_AGENT_TIMEOUT_MS
-// (milliseconds) for setups where a person works inside a tab while the agent
-// stays idle, which otherwise looks identical to a crashed agent.
-const AGENT_TIMEOUT_ENV = Number(process.env.CLAUDEZILLA_AGENT_TIMEOUT_MS);
-const AGENT_TIMEOUT_MS = Number.isFinite(AGENT_TIMEOUT_ENV) && AGENT_TIMEOUT_ENV > 0
-  ? AGENT_TIMEOUT_ENV
-  : 600000; // 10 minutes default
-const CLEANUP_INTERVAL_MS = 60000; // 1 minute - check for orphaned agents every minute
+// Idle-agent reaper: closes the tabs of agents that have gone silent.
+// CLAUDEZILLA_AGENT_TIMEOUT_MS sets the timeout in milliseconds; 0 disables
+// the reaper entirely, for setups where a person works inside a tab while
+// the agent stays idle, which otherwise looks identical to a crashed agent.
+const { disabled: AGENT_TIMEOUT_DISABLED, timeoutMs: AGENT_TIMEOUT_MS } = resolveAgentTimeout();
+const agentReaper = createAgentReaper({
+  timeoutMs: AGENT_TIMEOUT_MS,
+  disabled: AGENT_TIMEOUT_DISABLED,
+  onCleanup: async (agentId, idleMs) => {
+    console.error(`[claudezilla] Cleaning up orphaned agent: ${truncateAgentId(agentId)} (last seen ${Math.round(idleMs / 1000)}s ago)`);
+
+    // Send cleanup command to extension
+    const response = await sendCommand('cleanupOrphanedTabs', { agentId });
+
+    if (response.success && response.result?.tabsClosed > 0) {
+      console.error(`[claudezilla] Closed ${response.result.tabsClosed} orphaned tab(s) from ${truncateAgentId(agentId)}`);
+    }
+  },
+});
 
 /**
  * Update agent heartbeat - called on every command that includes agentId
  */
 function updateAgentHeartbeat(agentId) {
-  if (!agentId || agentId === 'unknown') return;
-  agentHeartbeats.set(agentId, Date.now());
+  agentReaper.touch(agentId);
 }
 
-/**
- * Check for orphaned agents and trigger tab cleanup
- * An agent is orphaned if it hasn't been seen in AGENT_TIMEOUT_MS
- */
-async function cleanupOrphanedAgents() {
-  const now = Date.now();
-  const orphanedAgents = [];
-
-  // Find agents that haven't been seen in AGENT_TIMEOUT_MS
-  for (const [agentId, lastSeen] of agentHeartbeats.entries()) {
-    if (now - lastSeen > AGENT_TIMEOUT_MS) {
-      orphanedAgents.push(agentId);
-    }
-  }
-
-  // Cleanup tabs for each orphaned agent
-  for (const agentId of orphanedAgents) {
-    try {
-      console.error(`[claudezilla] Cleaning up orphaned agent: ${truncateAgentId(agentId)} (last seen ${Math.round((now - agentHeartbeats.get(agentId)) / 1000)}s ago)`);
-
-      // Send cleanup command to extension
-      const response = await sendCommand('cleanupOrphanedTabs', { agentId });
-
-      if (response.success && response.result?.tabsClosed > 0) {
-        console.error(`[claudezilla] Closed ${response.result.tabsClosed} orphaned tab(s) from ${truncateAgentId(agentId)}`);
-      }
-
-      // Remove from heartbeat tracking
-      agentHeartbeats.delete(agentId);
-    } catch (error) {
-      console.error(`[claudezilla] Error cleaning up orphaned agent ${truncateAgentId(agentId)}:`, error.message);
-    }
-  }
-}
-
-// Start periodic orphaned agent cleanup.
-// .unref() so the process can exit naturally when the stdio transport closes,
-// without this interval pinning the event loop open.
-const cleanupIntervalId = setInterval(() => {
-  cleanupOrphanedAgents().catch(e => console.error('[claudezilla] Cleanup error:', e));
-}, CLEANUP_INTERVAL_MS);
-cleanupIntervalId.unref();
+// Start periodic orphaned agent cleanup. A disabled reaper never schedules a
+// sweep, so no agent's tabs are closed.
+agentReaper.start();
 
 // Pending fire-and-forget consent setTimeout handles. Tracked so handleShutdown
 // can cancel them and avoid racing against goodbye/exit.
@@ -1712,7 +1682,7 @@ let isShuttingDown = false;
 function handleShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  clearInterval(cleanupIntervalId);
+  agentReaper.stop();
   // Cancel any pending fire-and-forget consent calls before they can race
   // against the goodbye/exit sequence.
   for (const timer of pendingConsentTimers) clearTimeout(timer);
