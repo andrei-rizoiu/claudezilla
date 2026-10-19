@@ -1,7 +1,45 @@
 # CLZ002 Changelog
 
 **Project:** Claudezilla
-**Current Version:** 0.7.1
+**Current Version:** 0.7.2
+
+## v0.7.2 (2026-10-19)
+
+**Bounded frame waits, adopted-window politeness, correct MCP registration — community PRs #26, #27, #28, #30, plus issue #31.**
+
+### Fixes & Improvements
+
+- **Bounded Animation-Frame Waits (PR #26, @andrei-rizoiu)** — `firefox_click` and
+  `firefox_wait_for` settle in an unpainted tab (background tab, minimised window, another
+  Wayland workspace) instead of hanging until the host timeout. New `nextFrame()` bounds
+  every animation-frame wait; regression tests cover `smartQuerySelector`,
+  `checkPageReadiness` and `waitForStableRect`.
+- **An Adopted Window Is Never Taken Over (PR #27, @andrei-rizoiu)** — agent tabs are
+  created inactive in a user window, and `firefox_screenshot` captures the agent's tab
+  instead of the user's visible page.
+- **`CLAUDEZILLA_IPC_DIR` (PR #28, @andrei-rizoiu)** — POSIX-only override that isolates
+  the socket, auth token and debug log, so a visible profile and a headless profile can
+  run side by side without one taking over the other's socket.
+- **MCP Registration via `claude mcp add` (PR #30, @flo-dhalluin, fixes #24)** — the
+  installers register the server where Claude Code reads it (`~/.claude.json`), and the
+  Windows installer writes its JSON without a BOM.
+- **`firefox_evaluate` Is No Longer Auto-Allowed (#24)** — the blanket
+  `mcp__claudezilla__*` permission is replaced by an explicit tool list, so
+  `firefox_evaluate` stays behind the extension's own opt-in.
+- **Configurable Idle-Agent Cleanup (#31)** — `CLAUDEZILLA_AGENT_TIMEOUT_MS=0` now
+  disables the idle-agent reaper entirely.
+
+### Maintenance
+
+- Version `0.7.1` → `0.7.2` across `package.json`, `host/package.json`, `mcp/package.json`,
+  `extension/manifest.json`, `extension/popup/popup.html`, `CLAUDE.md`, `README.md`,
+  `website/extension.html`, `website/changelog.html`.
+- Regression suite `tests/` — 60 tests, 0 failures.
+- Web extension artifact built at `web-ext-artifacts/claudezilla-0.7.2.zip`.
+
+### References
+
+- [[CLZ030 v0.7.2 Release Plan and PR Review]]
 
 ## v0.7.1 (2026-10-08)
 
