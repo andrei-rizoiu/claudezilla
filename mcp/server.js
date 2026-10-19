@@ -19,6 +19,7 @@ import { resolve as resolvePath, extname } from 'path';
 import { getSocketPath, getAuthTokenPath } from '../host/ipc.js';
 import { requestOverSocket } from './socket-request.js';
 import { createAgentReaper, resolveAgentTimeout } from './agent-reaper.js';
+import { createAutostart, withAutostartDetail } from './autostart.js';
 
 // Single source of truth for the MCP server version. Reading from
 // package.json at module load keeps the version response in sync with the
@@ -30,6 +31,13 @@ const MCP_VERSION = JSON.parse(
 // Platform-independent paths from ipc.js abstraction layer
 const SOCKET_PATH = getSocketPath();
 const AUTH_TOKEN_FILE = getAuthTokenPath();
+
+// Optional on-demand browser start. Inert unless CLAUDEZILLA_AUTOSTART_CMD is
+// set; the command is an argv vector and is never run through a shell.
+const autostart = createAutostart({
+  socketPath: SOCKET_PATH,
+  env: process.env,
+});
 
 // Session resolution across coding harnesses (Claude Code, OMP, Pi, Hermes, etc.)
 // CLI arguments:
@@ -425,22 +433,47 @@ function buildErrorMessage(errCode, socketPath, authTokenFile) {
  * Send command to Claudezilla via Unix socket (single attempt)
  * SECURITY: Includes auth token read from host-created file
  */
-function sendCommandOnce(command, params = {}) {
+async function sendCommandOnce(command, params = {}) {
+  // Optional on-demand browser start. When the host is not reachable and
+  // CLAUDEZILLA_AUTOSTART_CMD is set, the browser is started and this call
+  // waits for its socket. A failed start is reported alongside the original
+  // connection error.
+  let startError = null;
+  try {
+    const start = await autostart.ensureStarted();
+    if (start.reason === 'launch-failed') {
+      startError = start.error ?? new Error('Autostart failed');
+    } else if (start.reason === 'cooldown') {
+      startError = new Error('Autostart skipped: the previous start failed and the retry cooldown has not elapsed.');
+    }
+  } catch (e) {
+    startError = e;
+  }
+
   // SECURITY: Load auth token on each command (handles host restarts)
   const authToken = loadAuthToken();
   if (!authToken) {
     const err = new Error(buildErrorMessage('NO_AUTH_TOKEN', SOCKET_PATH, AUTH_TOKEN_FILE));
     err.code = 'NO_AUTH_TOKEN';
-    return Promise.reject(err);
+    throw withAutostartDetail(err, startError);
   }
 
-  return requestOverSocket({
-    command,
-    params,
-    authToken,
-    socketPath: SOCKET_PATH,
-    describeError: (errCode) => buildErrorMessage(errCode, SOCKET_PATH, AUTH_TOKEN_FILE),
-  });
+  try {
+    return await requestOverSocket({
+      command,
+      params,
+      authToken,
+      socketPath: SOCKET_PATH,
+      describeError: (errCode) => buildErrorMessage(errCode, SOCKET_PATH, AUTH_TOKEN_FILE),
+    });
+  } catch (err) {
+    // A connection error means the host is gone: let the autostart re-probe
+    // (and re-launch) on the next command instead of assuming it is up.
+    if (RETRY_CONFIG.retryableCodes.includes(err.code)) {
+      autostart.markHostDown();
+    }
+    throw withAutostartDetail(err, startError);
+  }
 }
 
 /**
