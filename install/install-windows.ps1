@@ -27,6 +27,16 @@ function Test-SafePath {
     return $true
 }
 
+# Write UTF-8 without BOM. Windows PowerShell 5.1's "Set-Content -Encoding UTF8"
+# prepends a BOM, which breaks JSON.parse on the written file (see issue #24).
+function Write-Utf8NoBom {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$Content
+    )
+    [IO.File]::WriteAllText($Path, $Content, (New-Object Text.UTF8Encoding $false))
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $HostPath = Join-Path $ProjectDir "host\index.js"
@@ -99,7 +109,7 @@ $ManifestObject = @{
 }
 $ManifestContent = $ManifestObject | ConvertTo-Json -Depth 10
 
-Set-Content -Path $ManifestPath -Value $ManifestContent -Encoding UTF8
+Write-Utf8NoBom -Path $ManifestPath -Content $ManifestContent
 Write-Host "[OK] Created manifest: $ManifestPath"
 
 # Create registry key pointing to manifest
@@ -142,6 +152,7 @@ Write-Host ""
 $ClaudeDir = Join-Path $env:USERPROFILE ".claude"
 $SettingsFile = Join-Path $ClaudeDir "settings.json"
 $McpFile = Join-Path $ClaudeDir "mcp.json"
+$PermissionsFile = Join-Path $ScriptDir "claude-permissions.json"
 
 Write-Host "Configuring Claude Code for autonomous Claudezilla operations..."
 
@@ -150,8 +161,12 @@ if (-not (Test-Path $ClaudeDir)) {
     New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 }
 
-# Update settings.json to allow Claudezilla tools without prompts
+# Update settings.json to allow the Claudezilla tools without prompts.
+# The old blanket "mcp__claudezilla__*" entry also allowed firefox_evaluate
+# without a prompt, so it is removed and replaced by the explicit tool list
+# (install/claude-permissions.json).
 try {
+    $AllowedTools = @((Get-Content $PermissionsFile -Raw | ConvertFrom-Json).allow)
     if (Test-Path $SettingsFile) {
         $settings = Get-Content $SettingsFile -Raw | ConvertFrom-Json
         if (-not $settings.permissions) {
@@ -160,48 +175,61 @@ try {
         if (-not $settings.permissions.allow) {
             $settings.permissions | Add-Member -NotePropertyName "allow" -NotePropertyValue @() -Force
         }
-        if ($settings.permissions.allow -notcontains "mcp__claudezilla__*") {
-            $settings.permissions.allow = @($settings.permissions.allow) + @("mcp__claudezilla__*")
-        }
-        $settings | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile -Encoding UTF8
+        $existing = @($settings.permissions.allow | Where-Object { $_ -ne "mcp__claudezilla__*" })
+        $settings.permissions.allow = @(($existing + $AllowedTools) | Select-Object -Unique)
+        Write-Utf8NoBom -Path $SettingsFile -Content ($settings | ConvertTo-Json -Depth 10)
     } else {
-        @{
+        $settingsJson = @{
             permissions = @{
-                allow = @("mcp__claudezilla__*")
+                allow = $AllowedTools
             }
-        } | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile -Encoding UTF8
+        } | ConvertTo-Json -Depth 10
+        Write-Utf8NoBom -Path $SettingsFile -Content $settingsJson
     }
     Write-Host "[OK] Updated Claude Code permissions: $SettingsFile"
 } catch {
     Write-Host "[WARN] Could not update settings.json: $_" -ForegroundColor Yellow
 }
+Write-Host "Note: firefox_evaluate is not allowed by default. Enable it in the Claudezilla"
+Write-Host "      popup (Settings -> Allow JavaScript evaluation) and add"
+Write-Host "      `"mcp__claudezilla__firefox_evaluate`" to permissions.allow in $SettingsFile."
 
-# Update mcp.json to register Claudezilla MCP server
+# Register the MCP server via the Claude Code CLI (user scope -> ~/.claude.json).
+# ~/.claude/mcp.json is not read by Claude Code (see issue #24).
+$McpServerPath = (Join-Path $ProjectDir "mcp\server.js") -replace '\\', '/'
+$ManualMcpCmd = "claude mcp add --scope user claudezilla -- node `"$McpServerPath`""
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+    $PrevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & claude mcp remove --scope user claudezilla 2>&1 | Out-Null
+    & claude mcp add --scope user claudezilla -- node $McpServerPath
+    $McpAddExit = $LASTEXITCODE
+    $ErrorActionPreference = $PrevErrorAction
+    if ($McpAddExit -eq 0) {
+        Write-Host "[OK] Registered Claudezilla MCP server (user scope)"
+    } else {
+        Write-Host "[WARN] 'claude mcp add' failed. Run manually:" -ForegroundColor Yellow
+        Write-Host "  $ManualMcpCmd"
+    }
+} else {
+    Write-Host "[WARN] claude CLI not found. After installing Claude Code, run:" -ForegroundColor Yellow
+    Write-Host "  $ManualMcpCmd"
+}
+
+# Older installers wrote the server into ~/.claude/mcp.json, which Claude Code
+# does not read. Drop the stale entry so the file does not suggest a
+# registration that is not there.
 try {
-    $McpServerPath = "$($ProjectDir -replace '\\', '/')/mcp/server.js"
     if (Test-Path $McpFile) {
         $mcpConfig = Get-Content $McpFile -Raw | ConvertFrom-Json
-        if (-not $mcpConfig.mcpServers) {
-            $mcpConfig | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
+        if ($mcpConfig.mcpServers) {
+            $mcpConfig.mcpServers.PSObject.Properties.Remove("claudezilla")
+            Write-Utf8NoBom -Path $McpFile -Content ($mcpConfig | ConvertTo-Json -Depth 10)
+            Write-Host "[OK] Removed stale entry from $McpFile"
         }
-        $mcpConfig.mcpServers | Add-Member -NotePropertyName "claudezilla" -NotePropertyValue @{
-            command = "node"
-            args = @($McpServerPath)
-        } -Force
-        $mcpConfig | ConvertTo-Json -Depth 10 | Set-Content $McpFile -Encoding UTF8
-    } else {
-        @{
-            mcpServers = @{
-                claudezilla = @{
-                    command = "node"
-                    args = @($McpServerPath)
-                }
-            }
-        } | ConvertTo-Json -Depth 10 | Set-Content $McpFile -Encoding UTF8
     }
-    Write-Host "[OK] Updated Claude Code MCP config: $McpFile"
 } catch {
-    Write-Host "[WARN] Could not update mcp.json: $_" -ForegroundColor Yellow
+    Write-Host "[WARN] Could not clean $McpFile : $_" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -218,5 +246,5 @@ Write-Host ""
 Write-Host "2. Click the Claudezilla icon in Firefox toolbar to test connection"
 Write-Host ""
 Write-Host "Claudezilla is now configured for autonomous operation."
-Write-Host "All mcp__claudezilla__* tools will run without permission prompts." -ForegroundColor Green
+Write-Host "All Claudezilla tools except firefox_evaluate will run without permission prompts." -ForegroundColor Green
 Write-Host ""
