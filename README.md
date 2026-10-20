@@ -140,8 +140,9 @@ Claude, get all the links on this page
 ## Available Tools
 
 ### Browser Control
-- `firefox_create_window` — Open URL in browser
-- `firefox_navigate` — Navigate an existing tab (default: your current tab) to a URL
+- `firefox_create_window` — Open URL in browser; `container` opens the tab in a Firefox container (by name or cookieStoreId)
+- `firefox_navigate` — Navigate an existing tab (default: your current tab) to a URL; `container` asserts the tab is in that container (a mismatch returns `CONTAINER_IMMUTABLE`)
+- `firefox_list_containers` — List the Firefox containers (contextual identities) in the profile, with names and cookieStoreIds
 - `firefox_get_content` — Read visible page text or one element's text (20K chars per call, `offset` paging)
 - `firefox_click` — Click an element by `ref` (from a snapshot or `firefox_find`) or CSS selector
 - `firefox_type` — Type into an input field by `ref` or selector
@@ -150,6 +151,8 @@ Claude, get all the links on this page
 - `firefox_get_tabs` / `firefox_close_tab` — Manage tabs
 - `firefox_list_all_tabs` — List all open tabs, including ones not yet under Claudezilla's control
 - `firefox_attach_tab` / `firefox_detach_tab` — Attach to (or release) a tab the user already has open, driving it in place instead of opening a new one
+
+**Containers.** A tab opened with `container` lives in that container's cookie jar, so logins already established there apply. A container forces a non-private window (container cookies are persistent), and a tab's container cannot change after creation: to use another container, open a new tab. This needs the `cookies` and `contextualIdentities` permissions; neither triggers an install-time warning in Firefox.
 
 ### Configuration
 - `firefox_activate` — Only with opt-in lazy loading (`--tools lazy` or `CLAUDEZILLA_TOOL_MODE=lazy`): load tool categories on demand. By default every tool is listed.
