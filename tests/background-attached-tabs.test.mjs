@@ -53,7 +53,15 @@ function createHarness({
   windows: seededWindows = null,
   timers = { setTimeout, clearTimeout },
 } = {}) {
-  const storage = structuredClone(initialStorage);
+  // Local build: the extension defaults to a dedicated, non-private window
+  // (storage keys adoptCurrentWindow and claudezilla.privateMode flipped). The
+  // tests are written against upstream's defaults, so pin those unless a test
+  // sets the keys itself.
+  const storage = structuredClone({
+    adoptCurrentWindow: true,
+    ...initialStorage,
+    claudezilla: { privateMode: true, ...(initialStorage.claudezilla || {}) },
+  });
   const windows = new Map((seededWindows ?? [{ id: 7, incognito: false }]).map((win) => [win.id, { ...win }]));
   const tabs = new Map((seededTabs ?? [
     {
